@@ -1,0 +1,10 @@
+{
+  "name": "vercel-cors-proxy",
+  "version": "1.0.0",
+  "description": "A bare-simple Vercel CORS proxy for nippur72.github.io retro emulators",
+  "type": "module",
+  "main": "api/index.js",
+  "engines": {
+    "node": ">=18"
+  }
+}
