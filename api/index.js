@@ -23,11 +23,14 @@ export default async function handler(req, res) {
     return false;
   }
 
-  // Determine allowed origin (defaulting to https://nippur72.github.io for safety)
-  const allowedOrigin = isOriginAllowed(origin) ? origin : 'https://nippur72.github.io';
+  // Enforce origin check for safety
+  if (!isOriginAllowed(origin)) {
+    res.status(403).send('Error: Forbidden. Origin not allowed.');
+    return;
+  }
 
   // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+  res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', '*');
   res.setHeader('Access-Control-Max-Age', '86400'); // Cache preflight for 24 hours
@@ -103,13 +106,39 @@ export default async function handler(req, res) {
     res.setHeader('Content-Type', contentType);
 
     const contentLength = fetchResponse.headers.get('content-length');
-    if (contentLength) {
-      res.setHeader('Content-Length', contentLength);
+    const MAX_SIZE = 512 * 1024; // 512 KB
+    if (contentLength && parseInt(contentLength, 10) > MAX_SIZE) {
+      res.status(413).send('Error: File size limit exceeded (max 512 KB).');
+      return;
     }
 
-    // Read the remote content as arrayBuffer and send as Buffer
-    const arrayBuffer = await fetchResponse.arrayBuffer();
-    res.status(200).send(Buffer.from(arrayBuffer));
+    if (!fetchResponse.body) {
+      res.setHeader('Content-Length', '0');
+      res.status(200).send(Buffer.alloc(0));
+      return;
+    }
+
+    // Read the remote content in chunks to enforce size limit dynamically
+    const reader = fetchResponse.body.getReader();
+    const chunks = [];
+    let totalBytes = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      totalBytes += value.length;
+      if (totalBytes > MAX_SIZE) {
+        await reader.cancel();
+        res.status(413).send('Error: File size limit exceeded (max 512 KB).');
+        return;
+      }
+      chunks.push(value);
+    }
+
+    res.setHeader('Content-Length', totalBytes.toString());
+    const buffer = Buffer.concat(chunks);
+    res.status(200).send(buffer);
   } catch (error) {
     console.error('Proxy request failed:', error);
     res.status(502).send(`Error: Failed to fetch the target URL. Details: ${error.message}`);
